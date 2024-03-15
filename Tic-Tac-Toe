@@ -1,0 +1,144 @@
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity top is
+    port (
+        clk     : in std_ulogic;                        -- Clock input
+        reset_n : in std_ulogic;                        -- Reset input
+        move    : in std_ulogic;                        -- Move input signal
+        switch  : in std_ulogic_vector(9 downto 0);     -- Switch input vector
+        x_led   : out std_ulogic_vector(8 downto 0);    -- Output vector for X LEDs
+        o_led   : out std_ulogic_vector(8 downto 0)     -- Output vector for O LEDs
+    );
+end entity top;
+
+architecture top_arch of top is
+
+    component cell_encoder is
+        port (
+            switch : in std_ulogic_vector(8 downto 0); -- Input switch vector to encode
+            cell : out std_ulogic_vector(3 downto 0)   -- Output encoded cell vector
+        );
+    end component cell_encoder;
+
+    component cell_decoder is
+        port (
+            cell : in std_ulogic_vector(3 downto 0);    -- Input encoded cell vector
+            cell_one_hot : out std_ulogic_vector(8 downto 0)  -- Output one-hot cell vector
+        );
+    end component cell_decoder;
+
+    component demux_1to2 is
+        port (
+            input : in std_ulogic;      -- Input signal to demux
+            sel : in std_ulogic;        -- Selection signal for demux
+            output : out std_ulogic_vector(1 downto 0)  -- Output vector of demux
+        );
+    end component demux_1to2;
+
+    component led_grid_storage is
+        port (
+            clk : in std_ulogic;                -- Clock input
+            reset : in std_ulogic;               -- Reset input
+            set : in std_ulogic;                -- Set signal for storage
+            cell_one_hot : in std_ulogic_vector(8 downto 0);  -- One-hot cell representation
+            led : out std_ulogic_vector(8 downto 0)          -- Output vector for LEDs
+        );
+    end component led_grid_storage;
+
+    component move_validator is
+        port (
+            cell_one_hot : in std_ulogic_vector(8 downto 0);  -- One-hot cell representation
+            x_grid : in std_ulogic_vector(8 downto 0);        -- X grid LEDs
+            o_grid : in std_ulogic_vector(8 downto 0);        -- O grid LEDs
+            move_valid : out std_ulogic                       -- Move validity signal
+        );
+    end component move_validator;
+
+    -- bus for the encoded cell representation
+    signal cell : std_ulogic_vector(3 downto 0);    -- Encoded cell representation
+    -- bus for the one-hot cell representation
+    signal cell_one_hot : std_ulogic_vector(8 downto 0); -- One-hot cell representation
+    -- signals used to wire the outputs of the demuxes to the LEDs;
+    -- bit 0 is for X, and bit 1 is for O
+    signal reset : std_ulogic;                  -- Reset signal 
+    signal x_led_internal : std_ulogic_vector(8 downto 0);  -- Internal signal for X LEDs
+    signal o_led_internal : std_ulogic_vector(8 downto 0);  -- Internal signal for O LEDs
+    signal move_valid : std_ulogic;            -- Move validity signal
+    signal move_valid2 : std_ulogic;           -- Move validity signal
+    signal led_set : std_ulogic_vector(1 downto 0);  -- LED set signal (0 for X, 1 for O)
+
+    signal power_on_reset: std_ulogic := '1';  -- Power-on reset signal
+
+begin
+
+    -- Process for power-on reset
+    reset_power_on: process (clk)
+    begin
+        if rising_edge(clk) then
+            power_on_reset <= '0';
+        end if;
+    end process;
+
+    -- Power-on reset signal generation
+    reset <= not reset_n or power_on_reset;
+
+    -- ANDing move signal with move validity
+    move_valid2 <= move_valid and move;
+
+    -- Output assignments for X and O LEDs
+    x_led <= x_led_internal;
+    o_led <= o_led_internal;
+
+    -- Instantiate storage for X grid LEDs
+    x_grid : led_grid_storage
+    port map (
+        clk => clk,
+        reset => reset,
+        set => led_set(0),
+        cell_one_hot => cell_one_hot(8 downto 0),
+        led => x_led_internal(8 downto 0)
+    );
+
+    -- Instantiate storage for O grid LEDs
+    o_grid : led_grid_storage
+    port map (
+        clk => clk,
+        reset => reset,
+        set => led_set(1), 
+        cell_one_hot => cell_one_hot(8 downto 0),
+        led => o_led_internal(8 downto 0)
+    );
+
+    -- Instantiate the cell_encoder component
+    encoder : cell_encoder
+    port map (
+        switch => switch(8 downto 0),
+        cell => cell
+    );
+ 
+    -- Instantiate the cell_decoder component
+    decoder : cell_decoder
+    port map (
+        cell => cell(3 downto 0),
+        cell_one_hot => cell_one_hot(8 downto 0)
+    );
+
+    -- Instantiate demux for LED grid selection
+    demux0 : demux_1to2 
+    port map (
+        input => move_valid2,
+        sel => switch(9),
+        output => led_set
+    );
+
+    -- Instantiate move validator
+    move_validator_I : move_validator
+    port map (
+        cell_one_hot => cell_one_hot(8 downto 0),
+        x_grid => x_led_internal(8 downto 0),
+        o_grid => o_led_internal(8 downto 0),
+        move_valid => move_valid
+    );
+
+end architecture;
